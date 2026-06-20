@@ -18,7 +18,8 @@ body{font-family:'IBM Plex Sans KR',sans-serif;background:#f0ede8;color:#111;min
 .app{max-width:980px;margin:0 auto;padding:20px}
 
 /* ── Header ── */
-.header{background:var(--c1);color:#fff;padding:18px 22px;border-radius:var(--radius);margin-bottom:14px;border-left:5px solid var(--acc)}
+.header{background:var(--c1);color:#fff;padding:18px 22px;border-radius:var(--radius);margin-bottom:14px;border-left:5px solid var(--acc);position:relative}
+.header-version{position:absolute;top:10px;right:16px;font-size:10px;font-family:'IBM Plex Mono',monospace;color:rgba(255,255,255,.45);letter-spacing:.5px}
 .header-top{display:flex;align-items:center;gap:10px;margin-bottom:4px}
 .header h1{font-size:17px;font-weight:700;letter-spacing:-0.5px;font-family:'IBM Plex Mono',monospace;text-transform:uppercase}
 .header p{font-size:11px;opacity:0.6;font-family:'IBM Plex Mono',monospace}
@@ -153,6 +154,7 @@ pre.desc-block{background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:4px
 <body>
 <div class="app">
   <header class="header">
+    <span class="header-version">Rev. 260620</span>
     <div class="header-top">
       <span aria-hidden="true" style="font-size:20px">✈</span>
       <h1>KE SCHEDULE UPLOADER</h1>
@@ -797,6 +799,8 @@ async function uploadToGCal() {
     const rl = document.getElementById('result-log');
     if (pb) pb.style.width = pct + '%';
     if (pl) pl.textContent = pct + '%';
+    const uc = document.getElementById('upload-count');
+    if (uc) uc.textContent = `진행중... ${i + 1}/${uploadEvs.length}`;
     if (rl) { rl.textContent = state.uploadLog.join('\n'); rl.scrollTop = rl.scrollHeight; }
 
     // small delay every BATCH to avoid rate limiting
@@ -1144,7 +1148,7 @@ function renderStep3() {
   const uploadSection = (state.uploading || state.uploadDone) ? `
     <div style="margin-top:12px">
       <div class="font-mono" style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
-        <span>진행중... ${done}/${filteredCount}</span><span id="upload-pct">${pct}%</span>
+        <span id="upload-count">진행중... ${done}/${filteredCount}</span><span id="upload-pct">${pct}%</span>
       </div>
       <div class="progress-wrap"><div class="progress-bar" id="upload-progress" style="width:${pct}%"></div></div>
       ${state.uploadDone ? `<div class="alert alert-success" style="margin-top:8px">
