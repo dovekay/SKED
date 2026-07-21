@@ -154,7 +154,7 @@ pre.desc-block{background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:4px
 <body>
 <div class="app">
   <header class="header">
-    <span class="header-version">Rev.260721</span>
+    <span class="header-version">Rev.260722</span>
     <div class="header-top">
       <span aria-hidden="true" style="font-size:20px">✈</span>
       <h1>KE SCHEDULE UPLOADER</h1>
@@ -424,8 +424,8 @@ function parseTextB(text) {
       const ac  = vals[pos]||''; pos++;
       const rank = vals[pos]||''; pos++;
       const duty = vals[pos]||''; pos++;
-      let crewId = '', name = '', comment = '';
-      if (pos < vals.length && PIC_RE.test(vals[pos]))  pos++;          // PIC code 스킵
+      let crewId = '', name = '', comment = '', pic = '';
+      if (pos < vals.length && PIC_RE.test(vals[pos]))  { pic = vals[pos]; pos++; }  // PIC code 저장
       if (pos < vals.length && CREW_RE.test(vals[pos])) { crewId = vals[pos]; pos++; }
       if (pos < vals.length && !FN_RE.test(vals[pos]) && !RANK_RE.test(vals[pos]) && !DATE_RE.test(vals[pos]) && !HEADER_VALS.has(vals[pos])) {
         name = vals[pos]; pos++;
@@ -441,22 +441,22 @@ function parseTextB(text) {
         const key = fn + '|' + date;
         lastKey = key;
         if (!flights[key]) flights[key] = { flightNum: fn, date, arrDate, dep, arr, depTime, arrTime, crew: [] };
-        if (name) flights[key].crew.push({ crewId, name, rank, duty, comment });
+        if (name) flights[key].crew.push({ crewId, name, rank, duty, comment, pic });
       }
 
     } else if (RANK_RE.test(v) && lastKey) {
       // ── continuation 행 ──
       const rank = vals[pos]||''; pos++;
       const duty = vals[pos]||''; pos++;
-      let crewId = '', name = '', comment = '';
-      if (pos < vals.length && PIC_RE.test(vals[pos]))  pos++;
+      let crewId = '', name = '', comment = '', pic = '';
+      if (pos < vals.length && PIC_RE.test(vals[pos]))  { pic = vals[pos]; pos++; }
       if (pos < vals.length && CREW_RE.test(vals[pos])) { crewId = vals[pos]; pos++; }
       if (pos < vals.length && !FN_RE.test(vals[pos]) && !RANK_RE.test(vals[pos]) && !DATE_RE.test(vals[pos]) && !HEADER_VALS.has(vals[pos])) {
         name = vals[pos]; pos++;
       }
       comment = readOptional();
       readOptional();
-      if (name) flights[lastKey].crew.push({ crewId, name, rank, duty, comment });
+      if (name) flights[lastKey].crew.push({ crewId, name, rank, duty, comment, pic });
 
     } else {
       pos++;
@@ -507,9 +507,17 @@ function buildCrewList(crew) {
   const nd = c => (c.duty || '').trim().toUpperCase();
   const fly = crew.filter(c => nd(c) === 'FLY' || nd(c) === 'FDT' || (!c.duty && c.rank));
   const tvl = crew.filter(c => nd(c) === 'TVL');
-  const sort = arr => [...arr].sort((a, b) => rankIdx(a.rank) - rankIdx(b.rank));
+  // PIC code 정렬: P1→F1→P2→F2→기타 순
+  const PIC_ORDER = ['P1','F1','P2','F2'];
+  const picIdx = p => { const i = PIC_ORDER.indexOf((p||'').trim().toUpperCase()); return i >= 0 ? i : 99; };
+  const hasPic = fly.length >= 3 && crew.some(c => c.pic && PIC_ORDER.includes((c.pic||'').trim().toUpperCase()));
+  const sort = arr => {
+    if (hasPic) return [...arr].sort((a, b) => picIdx(a.pic) - picIdx(b.pic));
+    return [...arr].sort((a, b) => rankIdx(a.rank) - rankIdx(b.rank));
+  };
   return [...sort(fly), ...sort(tvl)].map(c => {
-    let line = `${c.name} (${c.crewId}, ${c.rank || '?'})`;
+    const picStr = hasPic && c.pic ? `${c.pic} / ` : '';
+    let line = `${c.name} (${picStr}${c.crewId}, ${c.rank || '?'})`;
     const cmt = (c.comment || '').trim();
     if (cmt) line += ` [${cmt.length > 30 ? cmt.slice(0, 30) + '...' : cmt}]`;
     if (nd(c) === 'TVL') line += ' [TVL]';
