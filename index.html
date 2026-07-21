@@ -154,7 +154,7 @@ pre.desc-block{background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:4px
 <body>
 <div class="app">
   <header class="header">
-    <span class="header-version">Rev. 260620</span>
+    <span class="header-version">Rev.260721</span>
     <div class="header-top">
       <span aria-hidden="true" style="font-size:20px">✈</span>
       <h1>KE SCHEDULE UPLOADER</h1>
@@ -619,7 +619,13 @@ ${selfLabel}` });
           // 날짜가 바뀌는데 직전 항목이 LO가 아니면 → 새 Trip으로 분리
           // (단, 직전이 자정 넘기는 비행이면 그 비행의 도착일 기준으로 비교)
           const prevEffDate = prev && prev.type === 'FLIGHT' ? (prev.arrDate || prev.date) : (prev ? prev.date : null);
-          if (prev && it.date !== prevEffDate && prev.type !== 'LO') break;
+          const dateChanged = prev && it.date !== prevEffDate;
+          // 공항 연속성: 이전 도착지 = 이번 출발지 (퀵턴 패턴 연결)
+          const airportContinuous = prev && prev.type === 'FLIGHT' && it.dep === prev.arr;
+          // 베이스 공항(ICN/GMP) 귀환 후 날짜 변경이면 Trip 종료 (완전 귀환 패턴)
+          const BASE = new Set(['ICN','GMP']);
+          const returnedToBase = prev && prev.type === 'FLIGHT' && BASE.has(prev.arr) && dateChanged;
+          if (prev && dateChanged && prev.type !== 'LO' && (!airportContinuous || returnedToBase)) break;
           tripItems.push(it); j++;
         } else if (it.type === 'LO') {
           tripItems.push(it); j++;
