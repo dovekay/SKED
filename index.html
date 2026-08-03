@@ -154,7 +154,7 @@ pre.desc-block{background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:4px
 <body>
 <div class="app">
   <header class="header">
-    <span class="header-version">Rev.260722</span>
+    <span class="header-version">Rev.260803</span>
     <div class="header-top">
       <span aria-hidden="true" style="font-size:20px">✈</span>
       <h1>KE SCHEDULE UPLOADER</h1>
@@ -210,7 +210,7 @@ const state = {
   uploading: false,
   uploadLog: [],
   uploadDone: false,
-  uploadResults: { ok: 0, skip: 0, fail: 0 }
+  uploadResults: { ok: 0, upd: 0, skip: 0, fail: 0 }
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -775,17 +775,39 @@ async function uploadToGCal() {
     const body = toGCalEvent(ev);
 
     try {
-      // duplicate check: search by summary + date
-      const checkFrom = ev.date + 'T00:00:00Z';
-      const checkTo = addDay(ev.arrDate || ev.endDate || ev.date) + 'T00:00:00Z';
+      // ── 중복 체크 ──
+      // KST(UTC+9) 기준 자정으로 검색 범위 설정 (UTC 사용 시 새벽 이벤트 누락 방지)
+      // KST 자정 = UTC 전날 15:00 이므로 하루 앞당겨 검색
+      const checkFrom = prevDay(ev.date) + 'T15:00:00Z'; // = ev.date 00:00 KST
+      const checkToBase = ev.arrDate || ev.endDate || ev.date;
+      const checkTo = checkToBase + 'T15:00:00Z';        // = checkToBase+1 00:00 KST
       const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?q=${encodeURIComponent(ev.title)}&timeMin=${checkFrom}&timeMax=${checkTo}&singleEvents=true`;
       const searchR = await fetch(searchUrl, { headers: { Authorization: 'Bearer ' + state.accessToken } });
       const searchData = await searchR.json();
       const existing = (searchData.items || []).find(e => e.summary === ev.title);
 
       if (existing) {
-        state.uploadResults.skip++;
-        state.uploadLog.push(`⏭  SKIP  ${ev.date} │ ${ev.title}`);
+        // ── description 비교: 달라졌으면 PATCH로 업데이트 ──
+        const existingDesc = (existing.description || '').trim();
+        const newDesc = (body.description || '').trim();
+        if (existingDesc === newDesc) {
+          state.uploadResults.skip++;
+          state.uploadLog.push(`⏭  SKIP  ${ev.date} │ ${ev.title}`);
+        } else {
+          const patchR = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${calId}/events/${existing.id}`, {
+            method: 'PATCH',
+            headers: { Authorization: 'Bearer ' + state.accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: body.description })
+          });
+          if (patchR.ok) {
+            state.uploadResults.upd = (state.uploadResults.upd || 0) + 1;
+            state.uploadLog.push(`✏  UPD   ${ev.date} │ ${ev.title}`);
+          } else {
+            const err = await patchR.json();
+            state.uploadResults.fail++;
+            state.uploadLog.push(`✗  FAIL  ${ev.date} │ ${ev.title} (${err.error?.message || patchR.status})`);
+          }
+        }
       } else {
         const postR = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${calId}/events`, {
           method: 'POST',
@@ -1166,7 +1188,7 @@ function renderStep3() {
       </div>
       <div class="progress-wrap"><div class="progress-bar" id="upload-progress" style="width:${pct}%"></div></div>
       ${state.uploadDone ? `<div class="alert alert-success" style="margin-top:8px">
-        완료: ✓ ${state.uploadResults.ok}개 등록 · ⏭ ${state.uploadResults.skip}개 건너뜀 · ✗ ${state.uploadResults.fail}개 실패
+        완료: ✓ ${state.uploadResults.ok}개 등록 · ✏ ${state.uploadResults.upd||0}개 업데이트 · ⏭ ${state.uploadResults.skip}개 건너뜀 · ✗ ${state.uploadResults.fail}개 실패
       </div>` : ''}
       <div class="result-log" id="result-log">${state.uploadLog.join('\n')}</div>
     </div>` : '';
