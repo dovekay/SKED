@@ -154,7 +154,7 @@ pre.desc-block{background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:4px
 <body>
 <div class="app">
   <header class="header">
-    <span class="header-version">Rev.260803</span>
+    <span class="header-version">Rev.260804</span>
     <div class="header-top">
       <span aria-hidden="true" style="font-size:20px">✈</span>
       <h1>KE SCHEDULE UPLOADER</h1>
@@ -517,7 +517,7 @@ function buildCrewList(crew) {
   };
   return [...sort(fly), ...sort(tvl)].map(c => {
     const picStr = hasPic && c.pic ? `${c.pic} / ` : '';
-    let line = `${c.name} (${picStr}${c.crewId}, ${c.rank || '?'})`;
+    let line = `${picStr}${c.name} (${c.crewId}, ${c.rank || '?'})`;
     const cmt = (c.comment || '').trim();
     if (cmt) line += ` [${cmt.length > 30 ? cmt.slice(0, 30) + '...' : cmt}]`;
     if (nd(c) === 'TVL') line += ' [TVL]';
