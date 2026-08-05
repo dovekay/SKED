@@ -154,7 +154,7 @@ pre.desc-block{background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:4px
 <body>
 <div class="app">
   <header class="header">
-    <span class="header-version">Rev.260805</span>
+    <span class="header-version">Rev.260806</span>
     <div class="header-top">
       <span aria-hidden="true" style="font-size:20px">✈</span>
       <h1>KE SCHEDULE UPLOADER</h1>
@@ -273,7 +273,8 @@ function cleanCalendarText(text) {
     /^(DO|RDO|ADO|ATDO|RESERVE)$/.test(l) ||  // 휴무/예비
     /^LO[A-Z]{3}$/.test(l) ||                 // 레이오버
     /^[A-Z0-9].+\d{2}:\d{2}/.test(l) ||       // 비행/SBY (시간 포함 줄)
-    /^(HM_SBY|AP_SBY)/.test(l);               // SBY 코드
+    /^(HM_SBY|AP_SBY)/.test(l) ||             // SBY 코드
+    /^[A-Z]{2,}$/.test(l);                    // SICK, ALV, ALM, UNION 등 단독 코드
 
   while (sliced.length > 0 && !isCalendarLine(sliced[sliced.length - 1])) {
     sliced.pop();
@@ -317,7 +318,7 @@ function parseTextA(text) {
     const apM = l.match(/^(AP_SBY\d*)([A-Z]{3})\s+(\d{2}:\d{2})\s*-\s*[A-Z]{3}\s+(\d{2}:\d{2})$/);
     if (apM) { items.push({ date: ds, type: 'AP_SBY', rawCode: apM[1], start: apM[3], end: apM[4] }); continue; }
 
-    const offM = l.match(/^(DO|RDO|ADO|ATDO|RESERVE)$/);
+    const offM = l.match(/^(DO|RDO|ADO|ATDO|RESERVE|SICK)$/);
     if (offM) { items.push({ date: ds, type: offM[1] }); continue; }
 
     const flM = l.match(/^([A-Z0-9]{2,6}[A-Z]?)([A-Z]{3})\s+(\d{2}:\d{2})\s*-\s*([A-Z]{3})\s+(\d{2}:\d{2})$/);
@@ -576,7 +577,7 @@ function buildEvents(merged, crewId, defaultRank, selfName) {
   while (i < merged.length) {
     const item = merged[i];
 
-    if (['DO','RDO','ADO','ATDO','RESERVE'].includes(item.type)) {
+    if (['DO','RDO','ADO','ATDO','RESERVE','SICK'].includes(item.type)) {
       const disp = ALLDAY_DISPLAY[item.type] || item.type;
       events.push({ type: 'allday', subtype: item.type, date: item.date, title: disp,
         description: `${disp}\n\n${selfLabel}` });
@@ -673,7 +674,8 @@ ${selfLabel}` });
           dep: f.dep, arr: f.arr, actingRank: f.actingRank || defaultRank,
           showUp: su ? su.display : null, showUpLabel: su ? su.label : null,
           crew: f.crew || [], description: desc });
-      }      i = j; continue;
+      }
+      i = j; continue;
     }
     i++;
   }
