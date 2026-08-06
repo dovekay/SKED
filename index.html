@@ -154,7 +154,7 @@ pre.desc-block{background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:4px
 <body>
 <div class="app">
   <header class="header">
-    <span class="header-version">Rev.260806</span>
+    <span class="header-version">Rev.260807</span>
     <div class="header-top">
       <span aria-hidden="true" style="font-size:20px">✈</span>
       <h1>KE SCHEDULE UPLOADER</h1>
@@ -937,6 +937,19 @@ function fmtDateRange(s, e) {
   const DAYS = ['일','월','화','수','목','금','토'];
   const fmt = ds => { const d = new Date(ds + 'T00:00:00'); return `${pad(d.getMonth()+1)}/${pad(d.getDate())} (${DAYS[d.getDay()]})`; };
   return s === e ? fmt(s) : `${fmt(s)} ~ ${fmt(e)}`;
+}
+function getEventDates(ev) {
+  if (ev.type === 'allday' && ev.endDate && ev.endDate !== ev.date) {
+    const dates = [];
+    const [sy,sm,sd] = ev.date.split('-').map(Number);
+    const [ey,em,ed] = ev.endDate.split('-').map(Number);
+    let d = new Date(sy,sm-1,sd);
+    const end = new Date(ey,em-1,ed);
+    const fmt = dt => `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}`;
+    while (d <= end) { dates.push(fmt(d)); d.setDate(d.getDate()+1); }
+    return dates;
+  }
+  return [ev.date];
 }
 function evClass(ev) {
   if (ev.subtype === 'FLIGHT') return 'ev-flight';
