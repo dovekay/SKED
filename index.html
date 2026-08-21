@@ -1249,7 +1249,7 @@ function renderStep3() {
     ).join('') + '</div>';
 
   // ── Upload progress / results ──
-  const done = state.uploadResults.ok + state.uploadResults.skip + state.uploadResults.fail;
+  const done = state.uploadResults.ok + (state.uploadResults.upd||0) + state.uploadResults.skip + state.uploadResults.fail;
   const pct = filteredCount ? Math.round((done / filteredCount) * 100) : 0;
   const uploadSection = (state.uploading || state.uploadDone) ? `
     <div style="margin-top:12px">
