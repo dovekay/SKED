@@ -154,7 +154,7 @@ pre.desc-block{background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:4px
 <body>
 <div class="app">
   <header class="header">
-    <span class="header-version">Rev.260818</span>
+    <span class="header-version">Rev.260821</span>
     <div class="header-top">
       <span aria-hidden="true" style="font-size:20px">✈</span>
       <h1>KE SCHEDULE UPLOADER</h1>
@@ -188,6 +188,9 @@ const ALLDAY_DISPLAY = {
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const NAEHANG_SET = new Set(['ICN|PUS','PUS|ICN','ICN|TAE','TAE|ICN']); // 내항기 구간
 const BASE_AIRPORTS_SET = new Set(['ICN','GMP']);                        // 베이스 공항
+// 지상학술(Recurrent Ground School) 코드: COMRGS2(Common), 73RECGS2(기종) 등
+// 같은 날 여러 개가 있어도 종일 이벤트는 "RECGS{차수}" 하나로만 생성
+const GROUND_SCHOOL_RE = /^(COMRGS\d|\d{1,3}RECGS\d)$/;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // State
@@ -373,6 +376,10 @@ function parseTextA(text) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function parseTextB(text) {
   const FN_RE   = /^[A-Z]{2,3}\d{1,4}[A-Z]?$/;
+  // 시뮬레이터 훈련 코드 (73RECPC2, 73RECPT2 등): A/C・Duty 컬럼 없이 [rank, id, name] 반복 구조
+  // (때때로 이름 뒤에 737PCB 같은 Special Duty Code가 추가로 붙기도 함)
+  const TRAIN_RE = /^\d{1,3}REC(PC|PT)\d$/;
+  const RANK_LIKE_RE = /^[A-Z]{2,6}$/; // 순수 알파벳(CAP/FO/INT 등)만 rank로 인정 → 숫자 섞인 SDC(737PCB)와 구분
   const DATE_RE = /^\d{4}-\d{2}-\d{2}/;
   const CREW_RE = /^\d{5,}$/;
   const PIC_RE  = /^[PF]\d{1,2}$/;
@@ -409,7 +416,7 @@ function parseTextB(text) {
   const readOptional = () => {
     if (pos >= vals.length) return '';
     const v = vals[pos];
-    if (HEADER_VALS.has(v) || FN_RE.test(v) || RANK_RE.test(v) || DATE_RE.test(v)) return '';
+    if (HEADER_VALS.has(v) || FN_RE.test(v) || RANK_RE.test(v) || DATE_RE.test(v) || TRAIN_RE.test(v)) return '';
     pos++;
     return v;
   };
@@ -445,6 +452,39 @@ function parseTextB(text) {
         lastKey = key;
         if (!flights[key]) flights[key] = { flightNum: fn, date, arrDate, dep, arr, depTime, arrTime, crew: [] };
         if (name) flights[key].crew.push({ crewId, name, rank, duty, comment, pic });
+      }
+
+    } else if (TRAIN_RE.test(v) && pos + 4 < vals.length && DATE_RE.test(vals[pos + 2]) && DATE_RE.test(vals[pos + 4])) {
+      // ── 시뮬레이터 훈련 코드 시작 (73RECPC2, 73RECPT2 등) ──
+      const fn  = vals[pos]; pos++;
+      const dep = vals[pos]||''; pos++;
+      const std = vals[pos]||''; pos++;
+      const arr = vals[pos]||''; pos++;
+      const sta = vals[pos]||''; pos++;
+      const date    = std.match(/(\d{4}-\d{2}-\d{2})/)[1];
+      const depTime = std.replace(/\d{4}-\d{2}-\d{2}\s*/, '').trim();
+      const arrDate = (sta.match(/(\d{4}-\d{2}-\d{2})/) || [, date])[1];
+      const arrTime = sta.replace(/\d{4}-\d{2}-\d{2}\s*/, '').trim();
+      const key = fn + '|' + date;
+      lastKey = key;
+      if (!flights[key]) flights[key] = { flightNum: fn, date, arrDate, dep, arr, depTime, arrTime, crew: [] };
+      // 크루 행: [rank, id, name] 반복 (이름 뒤에 SDC가 붙는 경우도 있음)
+      while (pos < vals.length) {
+        const rankV = vals[pos];
+        if (rankV === undefined || HEADER_VALS.has(rankV)) break;
+        if (FN_RE.test(rankV) && DATE_RE.test(vals[pos + 2])) break;
+        if (TRAIN_RE.test(rankV) && DATE_RE.test(vals[pos + 2])) break;
+        if (!RANK_LIKE_RE.test(rankV)) break; // 예상 밖 토큰 → 크루 목록 종료로 간주
+        pos++;
+        const idV = vals[pos]; pos++;
+        const nameV = vals[pos]; pos++;
+        if (idV === undefined || nameV === undefined) break;
+        flights[key].crew.push({ crewId: idV, name: nameV, rank: rankV, duty: '', comment: '', pic: '' });
+        // 이름 뒤에 Special Duty Code(예: 737PCB)가 붙어 있으면 소비하고 넘어감
+        if (pos < vals.length && vals[pos] !== undefined && !RANK_LIKE_RE.test(vals[pos]) &&
+            !HEADER_VALS.has(vals[pos]) && !FN_RE.test(vals[pos]) && !TRAIN_RE.test(vals[pos])) {
+          pos++;
+        }
       }
 
     } else if (RANK_RE.test(v) && lastKey) {
@@ -540,6 +580,13 @@ function merge(itemsA, flightsB, crewId, defaultRank) {
     dedup.push(item);
   }
   return dedup.map(item => {
+    if (item.type === 'UNKNOWN' && item.rawCode) {
+      // 시뮬레이터 훈련 코드(73RECPC2 등)처럼 Crew Roster Report에 크루 데이터가 있는 경우 매칭
+      const key = item.rawCode + '|' + item.date;
+      const b = flightsB[key];
+      if (b && b.crew && b.crew.length) return { ...item, crew: b.crew };
+      return { ...item };
+    }
     if (item.type !== 'FLIGHT') return { ...item };
     const key = item.flightNum + '|' + item.date;
     const b = flightsB[key];
@@ -563,6 +610,7 @@ function buildEvents(merged, crewId, defaultRank, selfName) {
     ? `${selfName} (${crewId}, ${defaultRank})`
     : (crewId ? `${crewId} / ${defaultRank}` : '');
   const events = [];
+  const groundSchoolAlldayDates = new Set(); // RECGS 계열: 날짜당 종일 이벤트 1개만
   // pre-compute show-ups: 날짜별 첫 비행마다 Show Up 계산
   let inTrip = false, lastSuDate = null;
   for (const it of merged) {
@@ -605,18 +653,26 @@ function buildEvents(merged, crewId, defaultRank, selfName) {
 
     if (item.type === 'UNKNOWN') {
       const code = item.rawCode;
-      // 종일 이벤트 항상 등록
-      events.push({ type: 'allday', subtype: 'UNKNOWN', date: item.date, title: code,
-        description: `${code}
+      const isGroundSchool = GROUND_SCHOOL_RE.test(code);
+      // 종일 이벤트: 지상학술(RECGS 계열)은 같은 날 여러 개여도 "RECGS{차수}" 하나만 등록
+      if (!(isGroundSchool && groundSchoolAlldayDates.has(item.date))) {
+        const alldayTitle = isGroundSchool ? ('RECGS' + code.slice(-1)) : code;
+        if (isGroundSchool) groundSchoolAlldayDates.add(item.date);
+        events.push({ type: 'allday', subtype: 'UNKNOWN', date: item.date, title: alldayTitle,
+          description: `${alldayTitle}
 
 ${selfLabel}` });
+      }
       // 시간대가 있으면 Timed 이벤트도 추가 (SBY와 동일 방식)
       if (item.start && item.end) {
+        // 시뮬레이터 훈련 코드(73RECPC2 등)처럼 Crew List가 있으면 비행 이벤트와 동일하게 출력
+        const crewStr = (item.crew || []).length ? '\n--- Crew List ---\n' + buildCrewList(item.crew) : '';
+        let desc = `${code} ${item.start} - ${item.end}`;
+        if (crewStr) desc += '\n' + crewStr;
+        else desc += `\n\n${selfLabel}`;
         events.push({ type: 'timed', subtype: 'UNKNOWN', date: item.date,
           title: `${code} ${item.start} - ${item.end}`, start: item.start, end: item.end,
-          description: `${code} ${item.start} - ${item.end}
-
-${selfLabel}` });
+          crew: item.crew || [], description: desc });
       }
       i++; continue;
     }
