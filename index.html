@@ -154,7 +154,7 @@ pre.desc-block{background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:4px
 <body>
 <div class="app">
   <header class="header">
-    <span class="header-version">Rev.260821</span>
+    <span class="header-version">Rev.260902</span>
     <div class="header-top">
       <span aria-hidden="true" style="font-size:20px">✈</span>
       <h1>KE SCHEDULE UPLOADER</h1>
@@ -715,10 +715,11 @@ ${selfLabel}` });
       const tripEndDate = endPlus.dayOffset > 0 ? addDay(endDate) : endDate;
       const tripEndTime = endPlus.time;
       const tripSuStr = tripSu ? `\nShow Up: ${tripSu.display} (${tripSu.label})` : '';
+      const tripTitle = `${tripStartTime.replace(':', '')} / ${route}`;
       events.push({ type: 'timed', subtype: 'TRIP',
         date: tripStartDate, start: tripStartTime,
         arrDate: tripEndDate, end: tripEndTime,
-        title: route,
+        title: tripTitle,
         description: `${route}\n기간: ${fmtDateRange(startDate, endDate)}\n${tripSuStr}\n\n${selfLabel}` });
 
       for (const f of flights) {
