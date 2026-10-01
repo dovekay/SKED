@@ -154,7 +154,7 @@ pre.desc-block{background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:4px
 <body>
 <div class="app">
   <header class="header">
-    <span class="header-version">Rev.260923b</span>
+    <span class="header-version">Rev.260923c</span>
     <div class="header-top">
       <span aria-hidden="true" style="font-size:20px">✈</span>
       <h1>KE SCHEDULE UPLOADER</h1>
@@ -383,9 +383,9 @@ function parseTextA(text) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function parseTextB(text) {
   const FN_RE   = /^[A-Z]{2,3}\d{1,4}[A-Z]?$/;
-  // 시뮬레이터 훈련 코드 (73RECPC2, 73RECPT2 등): A/C・Duty 컬럼 없이 [rank, id, name] 반복 구조
+  // 시뮬레이터 훈련 코드 (73RECPC2, 73RECPT2, 737FFS5 등): A/C・Duty 컬럼 없이 [rank, id, name] 반복 구조
   // (때때로 이름 뒤에 737PCB 같은 Special Duty Code가 추가로 붙기도 함)
-  const TRAIN_RE = /^\d{1,3}REC(PC|PT)\d$/;
+  const TRAIN_RE = /^\d{1,3}(REC(PC|PT)|FFS)\d{1,2}$/;
   const RANK_LIKE_RE = /^[A-Z]{2,6}$/; // 순수 알파벳(CAP/FO/INT 등)만 rank로 인정 → 숫자 섞인 SDC(737PCB)와 구분
   const DATE_RE = /^\d{4}-\d{2}-\d{2}/;
   const CREW_RE = /^\d{5,}$/;
@@ -697,10 +697,11 @@ ${selfLabel}` });
       }
       // 시간대가 있으면 Timed 이벤트도 추가 (SBY와 동일 방식)
       if (item.start && item.end) {
-        // 시뮬레이터 훈련 코드(73RECPC2 등)처럼 Crew List가 있으면 비행 이벤트와 동일하게 출력
+        // 시뮬레이터 훈련 코드(73RECPC2, 737FFS5 등)처럼 Crew List가 있으면 비행 이벤트와 동일하게 출력
+        // Show Up은 별도 계산 없이 스케줄에 적힌 시작 시각 그대로 표시
         const crewStr = (item.crew || []).length ? '\n--- Crew List ---\n' + buildCrewList(item.crew) : '';
         let desc = `${code} ${item.start} - ${item.end}`;
-        if (crewStr) desc += '\n' + crewStr;
+        if (crewStr) desc += `\n\nShow Up: ${item.start}\n${crewStr}`;
         else desc += `\n\n${selfLabel}`;
         events.push({ type: 'timed', subtype: 'UNKNOWN', date: item.date,
           title: `${code} ${item.start} - ${item.end}`, start: item.start, end: item.end,
