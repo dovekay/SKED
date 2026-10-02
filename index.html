@@ -154,7 +154,7 @@ pre.desc-block{background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:4px
 <body>
 <div class="app">
   <header class="header">
-    <span class="header-version">Rev.261001</span>
+    <span class="header-version">Rev.261001b</span>
     <div class="header-top">
       <span aria-hidden="true" style="font-size:20px">✈</span>
       <h1>KE SCHEDULE UPLOADER</h1>
@@ -809,6 +809,13 @@ async function fetchCalendars() {
     });
     const data = await r.json();
     state.calendars = (data.items || []).filter(c => c.accessRole === 'owner' || c.accessRole === 'writer');
+    // 드롭다운의 "선택됨" 표시는 실제 캘린더 id와 비교하는데, 초기값이 문자열 'primary'라
+    // 목록의 실제 기본 캘린더 id(보통 사용자 이메일)와 일치하지 않아 화면 표시와 실제 업로드 대상이
+    // 어긋나는 문제가 있었음 → 목록을 받아온 직후 실제 기본 캘린더의 id로 동기화
+    if (state.selectedCalendarId === 'primary') {
+      const primaryCal = state.calendars.find(c => c.primary);
+      if (primaryCal) state.selectedCalendarId = primaryCal.id;
+    }
   } catch (e) { state.calendars = []; }
 }
 
