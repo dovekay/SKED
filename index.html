@@ -154,7 +154,7 @@ pre.desc-block{background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:4px
 <body>
 <div class="app">
   <header class="header">
-    <span class="header-version">Rev.261001b</span>
+    <span class="header-version">Rev.261015</span>
     <div class="header-top">
       <span aria-hidden="true" style="font-size:20px">✈</span>
       <h1>KE SCHEDULE UPLOADER</h1>
@@ -611,6 +611,19 @@ function merge(itemsA, flightsB, crewId, defaultRank) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Build Calendar Events
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Trip 경계 판정 (Trip 묶음 / Show Up 계산 공용)
+// prev(직전 항목)와 it(현재 비행)이 서로 다른 Trip이면 true
+//  - 날짜가 바뀌었고 직전이 LO가 아니며,
+//  - 공항이 이어지지 않거나, 베이스(ICN/GMP) 귀환 후 날짜가 바뀐 경우
+function isTripBreak(prev, it) {
+  if (!prev) return false;
+  const prevEffDate = prev.type === 'FLIGHT' ? (prev.arrDate || prev.date) : prev.date;
+  const dateChanged = it.date !== prevEffDate;
+  const airportContinuous = prev.type === 'FLIGHT' && it.dep === prev.arr;
+  const returnedToBase = prev.type === 'FLIGHT' && BASE_AIRPORTS_SET.has(prev.arr) && dateChanged;
+  return dateChanged && prev.type !== 'LO' && (!airportContinuous || returnedToBase);
+}
+
 function buildEvents(merged, crewId, defaultRank, selfName) {
   // description에 표시할 본인 정보 한 줄 포맷
   const selfLabel = selfName && crewId && defaultRank
@@ -619,12 +632,14 @@ function buildEvents(merged, crewId, defaultRank, selfName) {
   const events = [];
   const groundSchoolAlldayDates = new Set(); // RECGS 계열: 날짜당 종일 이벤트 1개만
   const jcrmAlldayDates = new Set();          // JCRM 계열(RCRM/JCRM/EMER): 날짜당 종일 이벤트 1개만
-  // pre-compute show-ups: Trip 시작 또는 실제 레이오버(LO) 직후 첫 비행에만 Show Up 계산
-  // (자정만 넘기는 퀵턴은 LO가 없으므로 날짜가 바뀌어도 재계산하지 않음)
+  // pre-compute show-ups: Trip 시작, 실제 레이오버(LO) 직후, 또는 Trip 경계(베이스 귀환 후 날짜 변경 등) 첫 비행에만 계산
+  // (자정만 넘기는 퀵턴은 LO가 없고 공항이 이어지므로 날짜가 바뀌어도 재계산하지 않음)
   let inTrip = false, needsSu = true;
-  for (const it of merged) {
+  for (let k = 0; k < merged.length; k++) {
+    const it = merged[k];
     if (it.type === 'FLIGHT') {
       if (!inTrip) { inTrip = true; needsSu = true; }
+      if (isTripBreak(k > 0 ? merged[k-1] : null, it)) needsSu = true;
       if (needsSu) {
         it._su = calcShowUp(it.date, it.depTime, it.dep, it.arr);
         needsSu = false;
@@ -717,15 +732,8 @@ ${selfLabel}` });
         const it = merged[j];
         const prev = j > i ? merged[j-1] : null;
         if (it.type === 'FLIGHT') {
-          // 날짜가 바뀌는데 직전 항목이 LO가 아니면 → 새 Trip으로 분리
-          // (단, 직전이 자정 넘기는 비행이면 그 비행의 도착일 기준으로 비교)
-          const prevEffDate = prev && prev.type === 'FLIGHT' ? (prev.arrDate || prev.date) : (prev ? prev.date : null);
-          const dateChanged = prev && it.date !== prevEffDate;
-          // 공항 연속성: 이전 도착지 = 이번 출발지 (퀵턴 패턴 연결)
-          const airportContinuous = prev && prev.type === 'FLIGHT' && it.dep === prev.arr;
-          // 베이스 공항(ICN/GMP) 귀환 후 날짜 변경이면 Trip 종료 (완전 귀환 패턴)
-          const returnedToBase = prev && prev.type === 'FLIGHT' && BASE_AIRPORTS_SET.has(prev.arr) && dateChanged;
-          if (prev && dateChanged && prev.type !== 'LO' && (!airportContinuous || returnedToBase)) break;
+          // Trip 경계 판정 (공항 연속성 / 베이스 귀환 후 날짜 변경 등) → isTripBreak 공용 함수
+          if (isTripBreak(prev, it)) break;
           tripItems.push(it); j++;
         } else if (it.type === 'LO') {
           tripItems.push(it); j++;
@@ -1096,9 +1104,11 @@ function annotateShowUp(items) {
   // buildEvents의 pre-compute와 동일: Trip 시작 또는 실제 레이오버(LO) 직후에만 쇼업 표시
   // (자정만 넘기는 퀵턴은 LO가 없으므로 날짜가 바뀌어도 재계산하지 않음)
   let inTrip = false, needsSu = true;
-  for (const it of items) {
+  for (let k = 0; k < items.length; k++) {
+    const it = items[k];
     if (it.type === 'FLIGHT') {
       if (!inTrip) { inTrip = true; needsSu = true; }
+      if (isTripBreak(k > 0 ? items[k-1] : null, it)) needsSu = true;
       if (needsSu) {
         const su = calcShowUp(it.date, it.depTime, it.dep, it.arr);
         it._suDisp = su.display;
