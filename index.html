@@ -154,7 +154,7 @@ pre.desc-block{background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:4px
 <body>
 <div class="app">
   <header class="header">
-    <span class="header-version">Rev.261015</span>
+    <span class="header-version">Rev.261124</span>
     <div class="header-top">
       <span aria-hidden="true" style="font-size:20px">✈</span>
       <h1>KE SCHEDULE UPLOADER</h1>
@@ -206,6 +206,7 @@ const state = {
   parsedA: [], parsedB: {}, merged: [], events: [],
   year: new Date().getFullYear(),
   month: new Date().getMonth() + 1,
+  months: [],          // 붙여넣은 달력에서 감지된 월 목록 [{year, month}] (여러 달 지원)
   selectedDate: null,
   // Google auth
   accessToken: null,
@@ -291,18 +292,46 @@ function cleanCalendarText(text) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Parsing — Text A (calendar grid)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ── 여러 달 붙여넣기 대응: "Nov 2026" 같은 월 헤더 줄 기준으로 블록 분리 ──
+// 헤더가 없으면(달력 grid만 붙여넣은 경우) 빈 배열 반환 → 기존 방식(state.year/month)으로 처리
+function splitMonthBlocks(text) {
+  const lines = text.split('\n');
+  const HDR = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})$/;
+  const heads = [];
+  lines.forEach((l, idx) => {
+    const mm = l.trim().match(HDR);
+    if (mm) heads.push({ idx, y: parseInt(mm[2]), m: MONTH_NAME_MAP[mm[1]] });
+  });
+  if (!heads.length) return [];
+  const byMonth = new Map(); // 같은 달이 두 번 붙여넣어지면 나중 것만 사용
+  heads.forEach((h, i) => {
+    const endIdx = i + 1 < heads.length ? heads[i + 1].idx : lines.length;
+    byMonth.set(h.y * 100 + h.m, { y: h.y, m: h.m, text: lines.slice(h.idx, endIdx).join('\n') });
+  });
+  return [...byMonth.entries()].sort((a, b) => a[0] - b[0]).map(e => e[1]);
+}
+
 function parseTextA(text) {
+  const blocks = splitMonthBlocks(text);
+  const items = [];
+  const pendingSplits = {}; // 월 경계를 넘는 자정 split flight도 병합할 수 있도록 블록 간 공유
+  if (!blocks.length) {
+    parseCalendarBlock(text, state.year, state.month, items, pendingSplits);
+  } else {
+    for (const b of blocks) parseCalendarBlock(b.text, b.y, b.m, items, pendingSplits);
+  }
+  return items;
+}
+
+function parseCalendarBlock(text, y, m, items, pendingSplits) {
   text = cleanCalendarText(text);
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   const DAYS = new Set(['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']);
   let curDate = null;
-  const items = [];
-  const y = state.year, m = state.month;
   // 자정을 넘기는 비행은 달력 텍스트에서 이틀에 걸쳐 두 줄로 분리되어 표시됨:
   //   1일차: "KE619ICN 22:35 - MNL"      (출발시각 있음, 도착시각 없음)
   //   2일차: "KE619ICN - MNL 01:55"      (출발시각 없음, 도착시각 있음)
   // 편명을 키로 1일차 정보를 보관해뒀다가 2일차를 만나면 하나의 FLIGHT로 병합
-  const pendingSplits = {};
 
   for (const l of lines) {
     if (DAYS.has(l)) continue;
@@ -375,7 +404,6 @@ function parseTextA(text) {
       }
     }
   }
-  return items;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -405,12 +433,16 @@ function parseTextB(text) {
     if (m) { selfInfo = { name: m[1].trim(), crewId: m[2].trim(), rank: m[3].trim() }; break; }
   }
 
+  // 리포트가 여러 개(예: 11월+12월) 이어 붙여진 경우, 각 리포트 상단의 본인 헤더/요약 줄이
+  // 이전 리포트 마지막 크루의 Comment/SDC로 섞여 들어가지 않도록 제거
+  const SELF_HDR_RE = /^(.+?)\s*\|\s*(\d+)\s*\|\s*\S+\s*\|\s*(\S+)/;
+  const SUMMARY_RE  = /^FLY\s+\d+:\d+\s+TVL\s+\d+:\d+/;
   const vals = [];
   for (let i = 0; i < raw.length; ) {
     if (raw[i] === 'Flight/Activity' && raw[i+1] === 'From' && raw[i+2] === 'STD') {
       i += 13;
     } else {
-      if (raw[i]) vals.push(raw[i]);
+      if (raw[i] && !SELF_HDR_RE.test(raw[i]) && !SUMMARY_RE.test(raw[i])) vals.push(raw[i]);
       i++;
     }
   }
@@ -998,7 +1030,11 @@ function exportCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `ke_schedule_${state.year}${pad(state.month)}.csv`;
+  const _ms = state.months && state.months.length ? state.months : [{ year: state.year, month: state.month }];
+  const _f = _ms[0], _l = _ms[_ms.length - 1];
+  a.download = _ms.length > 1
+    ? `ke_schedule_${_f.year}${pad(_f.month)}-${_l.year}${pad(_l.month)}.csv`
+    : `ke_schedule_${_f.year}${pad(_f.month)}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -1130,9 +1166,19 @@ function doParseAndGo() {
   if (!state.textA.trim()) { alert('달력 텍스트를 입력해주세요.'); return; }
   // 연도/월 자동 감지
   const detected = autoDetectYearMonth(state.textA, state.textB);
-  state.year = detected.year;
-  state.month = detected.month;
-  state.detectedSource = detected.source;
+  const blocks = splitMonthBlocks(state.textA);
+  if (blocks.length) {
+    // 달력에 "Nov 2026" 같은 월 헤더가 있으면 그 기준 (여러 달 붙여넣기 지원)
+    state.months = blocks.map(b => ({ year: b.y, month: b.m }));
+    state.year = state.months[0].year;
+    state.month = state.months[0].month;
+    state.detectedSource = blocks.length > 1 ? '입력창 A (월 헤더, 여러 달)' : '입력창 A (월 헤더)';
+  } else {
+    state.year = detected.year;
+    state.month = detected.month;
+    state.months = [{ year: detected.year, month: detected.month }];
+    state.detectedSource = detected.source;
+  }
   state.parsedA = parseTextA(state.textA);
   const bResult = state.textB.trim() ? parseTextB(state.textB) : { flights: {}, selfInfo: null };
   state.parsedB = bResult.flights;
@@ -1156,6 +1202,14 @@ function doEventsAndGo() {
   state.step = 3;
   render();
   window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+// 감지된 월 표시 문자열: "2026년 11월" / "2026년 11월 ~ 12월" / "2026년 12월 ~ 2027년 1월"
+function monthsLabel() {
+  const ms = state.months && state.months.length ? state.months : [{ year: state.year, month: state.month }];
+  const f = ms[0], l = ms[ms.length - 1];
+  if (ms.length === 1) return `${f.year}년 ${f.month}월`;
+  return f.year === l.year ? `${f.year}년 ${f.month}월 ~ ${l.month}월` : `${f.year}년 ${f.month}월 ~ ${l.year}년 ${l.month}월`;
 }
 
 // ── Step 1 ──
@@ -1197,7 +1251,7 @@ function renderStep2() {
 
   return `
 <div class="alert alert-info" style="margin-bottom:10px">
-  📅 감지된 스케줄: <strong>${state.year}년 ${state.month}월</strong>
+  📅 감지된 스케줄: <strong>${monthsLabel()}</strong>
   <span style="opacity:0.7;font-size:11px"> (${state.detectedSource || '자동 감지'})</span>
   &nbsp;|&nbsp; 다른 월이면
   <button class="btn btn-secondary btn-sm" onclick="state.step=1;render()">← 되돌아가기</button>
@@ -1229,26 +1283,33 @@ function renderStep2() {
 function renderStep3() {
   const evs = state.events;
 
-  // ── Calendar preview ──
-  const y = state.year, m = state.month;
-  const firstDay = new Date(y, m - 1, 1).getDay();
-  const daysInMonth = new Date(y, m, 0).getDate();
+  // ── Calendar preview (여러 달이면 월별로 각각 표시) ──
   const dayNames = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  const months = state.months && state.months.length ? state.months : [{ year: state.year, month: state.month }];
 
   const byDate = {};
   for (const ev of evs) for (const d of getEventDates(ev)) { if (!byDate[d]) byDate[d] = []; byDate[d].push(ev); }
 
-  let calCells = '';
-  for (let d = 0; d < firstDay; d++) calCells += `<div class="cal-cell other-month"></div>`;
-  for (let day = 1; day <= daysInMonth; day++) {
-    const ds = `${y}-${pad(m)}-${pad(day)}`;
-    const dayEvs = byDate[ds] || [];
-    const evHtml = dayEvs.slice(0, 3).map(ev => `<div class="cal-event ${evClass(ev)}">${ev.title.length > 17 ? ev.title.slice(0, 17) + '…' : ev.title}</div>`).join('');
-    const more = dayEvs.length > 3 ? `<div class="font-mono" style="font-size:9px;color:#888">+${dayEvs.length - 3}</div>` : '';
-    const sel = state.selectedDate === ds;
-    calCells += `<div class="cal-cell${sel ? ' selected' : ''}" onclick="selectDate('${ds}')">
+  const buildMonthGrid = (y, m) => {
+    const firstDay = new Date(y, m - 1, 1).getDay();
+    const daysInMonth = new Date(y, m, 0).getDate();
+    let cells = '';
+    for (let d = 0; d < firstDay; d++) cells += `<div class="cal-cell other-month"></div>`;
+    for (let day = 1; day <= daysInMonth; day++) {
+      const ds = `${y}-${pad(m)}-${pad(day)}`;
+      const dayEvs = byDate[ds] || [];
+      const evHtml = dayEvs.slice(0, 3).map(ev => `<div class="cal-event ${evClass(ev)}">${ev.title.length > 17 ? ev.title.slice(0, 17) + '…' : ev.title}</div>`).join('');
+      const more = dayEvs.length > 3 ? `<div class="font-mono" style="font-size:9px;color:#888">+${dayEvs.length - 3}</div>` : '';
+      const sel = state.selectedDate === ds;
+      cells += `<div class="cal-cell${sel ? ' selected' : ''}" onclick="selectDate('${ds}')">
       <div class="date-num">${day}</div>${evHtml}${more}</div>`;
-  }
+    }
+    return cells;
+  };
+  const calendarHtml = months.map((mo, idx) => `
+  ${months.length > 1 ? `<div style="font-weight:700;font-size:13px;margin:${idx ? '16px' : '4px'} 0 6px">${mo.year}년 ${mo.month}월</div>` : ''}
+  <div class="cal-grid" style="margin-bottom:6px">${dayNames.map(d => `<div class="cal-header-cell">${d}</div>`).join('')}</div>
+  <div class="cal-grid">${buildMonthGrid(mo.year, mo.month)}</div>`).join('');
 
   let detailHtml = '';
   if (state.selectedDate) {
@@ -1330,9 +1391,8 @@ function renderStep3() {
 ${summaryBar}
 
 <div class="card">
-  <h2>📆 ${y}년 ${m}월 미리보기 <span style="font-size:11px;font-weight:400;color:#888">(날짜 클릭시 상세)</span></h2>
-  <div class="cal-grid" style="margin-bottom:6px">${dayNames.map(d => `<div class="cal-header-cell">${d}</div>`).join('')}</div>
-  <div class="cal-grid">${calCells}</div>
+  <h2>📆 ${monthsLabel()} 미리보기 <span style="font-size:11px;font-weight:400;color:#888">(날짜 클릭시 상세)</span></h2>
+  ${calendarHtml}
   ${detailHtml}
 </div>
 
