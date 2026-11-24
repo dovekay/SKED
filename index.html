@@ -480,7 +480,7 @@ function parseTextB(text) {
         name = vals[pos]; pos++;
       }
       comment = readOptional(); // Comment
-      readOptional();           // Special Duty Code
+      const sdc = readOptional(); // Special Duty Code
 
       if (fn && DATE_RE.test(std)) {
         const date    = std.match(/(\d{4}-\d{2}-\d{2})/)[1];
@@ -490,7 +490,7 @@ function parseTextB(text) {
         const key = fn + '|' + date;
         lastKey = key;
         if (!flights[key]) flights[key] = { flightNum: fn, date, arrDate, dep, arr, depTime, arrTime, crew: [] };
-        if (name) flights[key].crew.push({ crewId, name, rank, duty, comment, pic });
+        if (name) flights[key].crew.push({ crewId, name, rank, duty, comment, sdc, pic });
       }
 
     } else if (TRAIN_RE.test(v) && pos + 4 < vals.length && DATE_RE.test(vals[pos + 2]) && DATE_RE.test(vals[pos + 4])) {
@@ -537,8 +537,8 @@ function parseTextB(text) {
         name = vals[pos]; pos++;
       }
       comment = readOptional();
-      readOptional();
-      if (name) flights[lastKey].crew.push({ crewId, name, rank, duty, comment, pic });
+      const sdc = readOptional();
+      if (name) flights[lastKey].crew.push({ crewId, name, rank, duty, comment, sdc, pic });
 
     } else {
       pos++;
@@ -563,15 +563,36 @@ function getShowUpOffset(dep, arr) {
   return isDom ? { min: 60, label: '국내선, 1시간 전' } : { min: 80, label: '국제선, 1시간 20분 전' };
 }
 
-function calcShowUp(dateStr, timeStr, dep, arr) {
+function fmtMinBefore(min) {
+  const h = Math.floor(min / 60), m = min % 60;
+  return (h ? `${h}시간` : '') + (m ? `${h ? ' ' : ''}${m}분` : '') + ' 전';
+}
+
+function calcShowUp(dateStr, timeStr, dep, arr, extraMin = 0, note = '') {
   const [h, m] = timeStr.split(':').map(Number);
   const total = h * 60 + m;
   const { min, label } = getShowUpOffset(dep, arr);
-  const su = total - min;
+  const totalMin = min + extraMin;
+  const su = total - totalMin;
   let suffix = '', sh, sm;
   if (su < 0) { suffix = '(-1)'; const p = su + 1440; sh = Math.floor(p / 60); sm = p % 60; }
   else { sh = Math.floor(su / 60); sm = su % 60; }
-  return { display: `${pad(sh)}:${pad(sm)}${suffix}`, label };
+  // 추가 시간이 있으면 라벨의 분 표기도 합산해서 다시 생성 (예: 국제선, 1시간 35분 전 → 2시간 35분 전)
+  const outLabel = extraMin ? `${label.split(',')[0]}, ${fmtMinBefore(totalMin)}` : label;
+  return { display: `${pad(sh)}:${pad(sm)}${suffix}`, label: outLabel, note };
+}
+
+// 정기심사(REC LINE CHK) 비행: 본인의 Comment에 "REC LINE CHK", Special Duty Code에 "1HREARLY"가 있으면
+// Show Up이 평소보다 1시간 빠름 → 반영하고 메모에 [Comment, 1HR EARLY] 표기
+function calcShowUpForFlight(f, crewId) {
+  let extra = 0, note = '';
+  const mine = (f.crew || []).find(c => c.crewId === crewId);
+  if (mine) {
+    const cmt = (mine.comment || '').trim();
+    const early = /1\s*HR\s*EARLY/i.test(`${mine.sdc || ''} ${cmt}`);
+    if (early && /REC\s*LINE\s*CHK/i.test(cmt)) { extra = 60; note = `[${cmt}, 1HR EARLY]`; }
+  }
+  return calcShowUp(f.date, f.depTime, f.dep, f.arr, extra, note);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -673,7 +694,7 @@ function buildEvents(merged, crewId, defaultRank, selfName) {
       if (!inTrip) { inTrip = true; needsSu = true; }
       if (isTripBreak(k > 0 ? merged[k-1] : null, it)) needsSu = true;
       if (needsSu) {
-        it._su = calcShowUp(it.date, it.depTime, it.dep, it.arr);
+        it._su = calcShowUpForFlight(it, crewId);
         needsSu = false;
       }
     } else if (it.type === 'LO') {
@@ -787,7 +808,7 @@ ${selfLabel}` });
       const endPlus = addMinsToTime(lastFlight.arrTime, 30);
       const tripEndDate = endPlus.dayOffset > 0 ? addDay(endDate) : endDate;
       const tripEndTime = endPlus.time;
-      const tripSuStr = tripSu ? `\nShow Up: ${tripSu.display} (${tripSu.label})` : '';
+      const tripSuStr = tripSu ? `\nShow Up: ${tripSu.display} (${tripSu.label})${tripSu.note ? '\n' + tripSu.note : ''}` : '';
       const tripTitle = `${tripStartTime.replace(':', '')} / ${route}`;
       events.push({ type: 'timed', subtype: 'TRIP',
         date: tripStartDate, start: tripStartTime,
@@ -799,7 +820,7 @@ ${selfLabel}` });
         const su = f._su || null; // 날짜별 첫 비행에만 _su가 설정됨
         const crewStr = (f.crew || []).length ? '\n--- Crew List ---\n' + buildCrewList(f.crew) : '';
         let desc = `${f.flightNum} ${f.depTime} ${f.dep} - ${f.arr} ${f.arrTime}`;
-        if (su) desc += `\n\nShow Up: ${su.display} (${su.label})`;
+        if (su) desc += `\n\nShow Up: ${su.display} (${su.label})${su.note ? '\n' + su.note : ''}`;
         if (crewStr) desc += '\n' + crewStr;
         events.push({ type: 'timed', subtype: 'FLIGHT', date: f.date, arrDate: f.arrDate || f.date,
           title: `${f.flightNum} ${f.depTime} ${f.dep} - ${f.arr} ${f.arrTime}`,
@@ -1146,7 +1167,7 @@ function annotateShowUp(items) {
       if (!inTrip) { inTrip = true; needsSu = true; }
       if (isTripBreak(k > 0 ? items[k-1] : null, it)) needsSu = true;
       if (needsSu) {
-        const su = calcShowUp(it.date, it.depTime, it.dep, it.arr);
+        const su = calcShowUpForFlight(it, state.crewId);
         it._suDisp = su.display;
         it._suLabel = su.label;
         needsSu = false;
